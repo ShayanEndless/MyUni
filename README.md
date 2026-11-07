@@ -29,7 +29,7 @@
 
 برای دانلود مستقیم آخرین نسخه فایل نصب اندروید (APK)، روی لینک زیر کلیک کنید:
 
-➡️ **[دانلود آخرین نسخه APK برنامه (v1.1)](https://github.com/ShayanEndless/MyUni/releases/tag/v1.1)**
+➡️ **[دانلود آخرین نسخه APK برنامه (v1.1)](https://github.com/ShayanEndless/MyUni.git)**
 
 ---
 
