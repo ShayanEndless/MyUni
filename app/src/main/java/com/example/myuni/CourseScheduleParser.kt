@@ -21,10 +21,10 @@ data class ParsedCourse(
 object CourseScheduleParser {
 
     private val PERSIAN_DAYS = listOf("پنجشنبه", "چهارشنبه", "سه‌شنبه", "دوشنبه", "یکشنبه", "شنبه")
-    private val TIME_REGEX = Regex("""(\d{1,2})[：:.]?(\d{2})?\s*(?:تا|-|–|—|الی|الى|_|/|~|to)\s*(\d{1,2})[：:.]?(\d{2})?\s*([0-9۰-۹٠-٩]{2,4})?""")
+    private val TIME_REGEX = Regex("""(\d{1,2})[：:.]?(\d{2})?\s*(?:تا|ات|-|–|—|الی|الى|_|/|~|to)\s*(\d{1,2})[：:.]?(\d{2})?\s*([0-9۰-۹٠-٩]{2,4})?""")
 
     private val FORWARD_ROOM_REGEX = Regex(
-        """(?i)(?:^|[\s\-_:({\[\u200C])(کلاس|كلاس|مکان\s*برگزاری|مکان\s*تشکیل|مکان\s*کلاس|مکان|تالار|اتاق|دانشکده|سایت|آزمایشگاه|آزمايشگاه|آز|سالن|کارگاه|آمفی|ک\.|ک)\s*(?:شماره|شمارة|ش)?\s*[:：\-_#(){}\[\]«»"'\s]*([0-9۰-۹٠-٩a-zA-Z]+)[\}\]\)]*"""
+        """(?i)(?:^|[\s\-_:({\[\u200C])[\{\[\(]?\s*(کلاس|كلاس|مکان\s*برگزاری|مکان\s*تشکیل|مکان\s*کلاس|مکان|تالار|اتاق|دانشکده|سایت|آزمایشگاه|آزمايشگاه|آز|سالن|کارگاه|آمفی|ک\.|ک)\s*(?:شماره|شمارة|ش)?\s*[:：\-_#(){}\[\]«»"'\s]*([0-9۰-۹٠-٩a-zA-Z]+)[\}\]\)]*"""
     )
     private val REVERSE_ROOM_REGEX = Regex(
         """(?i)[{\[(]?\s*([0-9۰-۹٠-٩a-zA-Z]{2,5})\s*[})]?\s*[:：\-_#(){}\[\]«»"'\s]*(کلاس|كلاس|تالار|اتاق|دانشکده|سایت|آزمایشگاه|آزمايشگاه|آز|سالن|کارگاه|آمفی)(?:$|[\s\-_:)}\]\u200C])"""
@@ -41,16 +41,44 @@ object CourseScheduleParser {
     )
 
     fun parse(extractedText: String, textItems: List<PdfTextItem> = emptyList()): List<ParsedCourse> {
+        val decodedText = PersianFontDecoder.decodeAndNormalize(extractedText)
+        val decodedItems = textItems.map { item ->
+            item.copy(text = PersianFontDecoder.decodeAndNormalize(item.text))
+        }
+
+        val allCourses = mutableListOf<ParsedCourse>()
+
         // Strategy 1: Grid Table Parsing using X-Y coordinates (Golestan Report 88 / 78)
-        if (textItems.isNotEmpty()) {
-            val gridCourses = parseGridTable(textItems)
+        if (decodedItems.isNotEmpty()) {
+            val gridCourses = parseGridTable(decodedItems)
             if (gridCourses.isNotEmpty()) {
-                return deduplicateCourses(gridCourses)
+                allCourses.addAll(gridCourses)
             }
         }
 
-        // Strategy 2: Text-based line & sliding window parsing
-        val normalized = normalizeDigitsAndSpacing(extractedText)
+        // Strategy 2: Text-based line & sliding window parsing on decoded text
+        if (allCourses.isEmpty()) {
+            allCourses.addAll(parseFromText(decodedText))
+        }
+
+        // Strategy 3: Visual / Reversed Text Parsing (if previous strategies returned empty or if decoded text is reversed)
+        if (allCourses.isEmpty() || PersianFontDecoder.isReversedText(decodedText)) {
+            val unshapedText = PersianFontDecoder.unshapeReversedText(decodedText)
+            if (unshapedText != decodedText) {
+                allCourses.addAll(parseFromText(unshapedText))
+            }
+        }
+
+        // Strategy 4: Raw text fallback
+        if (allCourses.isEmpty() && extractedText != decodedText) {
+            allCourses.addAll(parseFromText(extractedText))
+        }
+
+        return deduplicateCourses(allCourses)
+    }
+
+    private fun parseFromText(text: String): List<ParsedCourse> {
+        val normalized = normalizeDigitsAndSpacing(text)
         val courses = mutableListOf<ParsedCourse>()
 
         val lines = normalized.lines().map { it.trim() }.filter { it.isNotBlank() }
@@ -73,21 +101,41 @@ object CourseScheduleParser {
             }
         }
 
-        return deduplicateCourses(courses)
+        return courses
     }
 
     fun normalizeDayName(text: String): String? {
-        val norm = normalizeDigitsAndSpacing(text).trim()
-        if (!norm.contains("شنبه") && !norm.contains("جمعه")) return null
+        val decoded = PersianFontDecoder.decodeAndNormalize(text)
+        val norm = normalizeDigitsAndSpacing(decoded).trim()
+        val unshaped = if (PersianFontDecoder.isReversedText(text)) {
+            PersianFontDecoder.unshapeReversedText(text)
+        } else norm
+
+        val target = if (!norm.contains("شنبه") && !norm.contains("جمعه") && (unshaped.contains("شنبه") || unshaped.contains("جمعه"))) {
+            unshaped
+        } else {
+            norm
+        }
+
+        if (!target.contains("شنبه") && !target.contains("جمعه")) return null
 
         return when {
-            norm.contains("پنج") || norm.contains("۵") || norm.contains("5") -> "پنجشنبه"
-            norm.contains("چهار") || norm.contains("۴") || norm.contains("4") -> "چهارشنبه"
-            norm.contains("سه") || norm.contains("۳") || norm.contains("3") -> "سه‌شنبه"
-            norm.contains("دو") || norm.contains("۲") || norm.contains("2") -> "دوشنبه"
-            norm.contains("یک") || norm.contains("يك") || norm.contains("۱") || norm.contains("1") -> "یکشنبه"
-            norm.contains("جمعه") -> "جمعه"
-            norm.contains("شنبه") -> "شنبه"
+            target.contains("پنج") || (target.contains("۵") && target.contains("شنبه")) || (target.contains("5") && target.contains("شنبه")) -> "پنجشنبه"
+            target.contains("چهار") || (target.contains("۴") && target.contains("شنبه")) || (target.contains("4") && target.contains("شنبه")) -> "چهارشنبه"
+            target.contains("سه") || (target.contains("۳") && target.contains("شنبه")) || (target.contains("3") && target.contains("شنبه")) -> "سه‌شنبه"
+            target.contains("دو") || (target.contains("۲") && target.contains("شنبه")) || (target.contains("2") && target.contains("شنبه")) -> "دوشنبه"
+            target.contains("یک") || target.contains("يك") || (target.contains("۱") && target.contains("شنبه")) || (target.contains("1") && target.contains("شنبه")) -> "یکشنبه"
+            target.contains("جمعه") -> "جمعه"
+            target.contains("شنبه") -> {
+                when {
+                    target.contains("۱") || target.contains("1") -> "یکشنبه"
+                    target.contains("۲") || target.contains("2") -> "دوشنبه"
+                    target.contains("۳") || target.contains("3") -> "سه‌شنبه"
+                    target.contains("۴") || target.contains("4") -> "چهارشنبه"
+                    target.contains("۵") || target.contains("5") -> "پنجشنبه"
+                    else -> "شنبه"
+                }
+            }
             else -> null
         }
     }
@@ -97,17 +145,35 @@ object CourseScheduleParser {
 
         // 1. Detect Header Day Columns dynamically
         val headerMap = mutableMapOf<String, Float>()
-        var yHeader = 0f
+        var yHeader = 176.3f
 
-        for (item in items) {
-            if (item.y > 300f) continue
-            val stdDay = normalizeDayName(item.text)
-            if (stdDay != null) {
-                if (!headerMap.containsKey(stdDay)) {
-                    headerMap[stdDay] = item.x
-                }
-                if (item.y > yHeader) {
-                    yHeader = item.y
+        val headerRowItems = items.filter { it.y in 140f..220f }.sortedBy { it.x }
+        val shanbeItems = headerRowItems.filter { it.text.contains("شنبه") }
+        val numItems = headerRowItems.filter { it.text.any { ch -> ch in '۱'..'۵' || ch in '1'..'5' || ch == '\u0000' } }
+
+        for (shanbe in shanbeItems) {
+            val numItem = numItems.lastOrNull { it.x < shanbe.x && (shanbe.x - it.x) < 70f }
+            val combinedText = if (numItem != null) "${numItem.text} ${shanbe.text}" else shanbe.text
+            val stdDay = normalizeDayName(combinedText)
+            if (stdDay != null && !headerMap.containsKey(stdDay)) {
+                headerMap[stdDay] = shanbe.x
+            }
+            if (shanbe.y > yHeader) {
+                yHeader = shanbe.y
+            }
+        }
+
+        if (headerMap.size < 2) {
+            for (item in items) {
+                if (item.y > 300f) continue
+                val stdDay = normalizeDayName(item.text)
+                if (stdDay != null) {
+                    if (!headerMap.containsKey(stdDay)) {
+                        headerMap[stdDay] = item.x
+                    }
+                    if (item.y > yHeader) {
+                        yHeader = item.y
+                    }
                 }
             }
         }
@@ -510,125 +576,16 @@ object CourseScheduleParser {
     }
 
     fun applyPersianHalfSpaceRules(text: String): String {
-        if (text.isBlank()) return text
-        var result = text
-
-        // Common compound words with half-space
-        result = result
-            .replace("برنامه نویسی", "برنامه‌نویسی")
-            .replace("نرم افزار", "نرم‌افزار")
-            .replace("سخت افزار", "سخت‌افزار")
-            .replace("پیاده سازی", "پیاده‌سازی")
-            .replace("بهینه سازی", "بهینه‌سازی")
-            .replace("شبیه سازی", "شبیه‌سازی")
-            .replace("مدل سازی", "مدل‌سازی")
-            .replace("خودکار سازی", "خودکارسازی")
-            .replace("پیش نیاز", "پیش‌نیاز")
-            .replace("هم نیاز", "هم‌نیاز")
-
-        // Fix plural suffixes " ها" -> "‌ها", " های" -> "‌های", " هایی" -> "‌هایی"
-        val haRegex = Regex("""([\u0621-\u064A\u067E\u0686\u06AF\u06A9\u06CC])\s+ها\b""")
-        result = haRegex.replace(result) { match ->
-            "${match.groupValues[1]}\u200Cها"
-        }
-
-        val hayRegex = Regex("""([\u0621-\u064A\u067E\u0686\u06AF\u06A9\u06CC])\s+های\b""")
-        result = hayRegex.replace(result) { match ->
-            "${match.groupValues[1]}\u200Cهای"
-        }
-
-        val hayeRegex = Regex("""([\u0621-\u064A\u067E\u0686\u06AF\u06A9\u06CC])\s+هایی\b""")
-        result = hayeRegex.replace(result) { match ->
-            "${match.groupValues[1]}\u200Cهایی"
-        }
-
-        return result
+        return PersianFontDecoder.applyPersianHalfSpaceRules(text)
     }
 
     fun fixLamAlefInversion(text: String): String {
-        if (text.isBlank()) return text
-        var result = text
-
-        val dictionaryFixes = mapOf(
-            "اسالم" to "اسلام",
-            "معادالت" to "معادلات",
-            "اطالعات" to "اطلاعات",
-            "احتماالت" to "احتمالات",
-            "مقاالت" to "مقالات",
-            "انقالب" to "انقلاب",
-            "تالش" to "تلاش",
-            "مالقات" to "ملاقات",
-            "اصالح" to "اصلاح",
-            "عالمت" to "علامت",
-            "اطالع" to "اطلاع",
-            "بالفاصله" to "بلافاصله",
-            "امالک" to "املاک",
-            "کالس" to "کلاس",
-            "ایاالت" to "ایالات",
-            "تعامالت" to "تعاملات",
-            "مواصالت" to "مواصلات",
-            "تشکیلات" to "تشکیلات",
-            "اصالحات" to "اصلاحات",
-            "اصطالحات" to "اصطلاحات",
-            "تحوالت" to "تحولات",
-            "تبادالت" to "تبادلات",
-            "اختالالت" to "اختلالات",
-            "مبتال" to "مبتلا",
-            "ابتال" to "ابتلا",
-            "غالم" to "غلام",
-            "سالم" to "سلام",
-            "مبادت" to "مبادلات"
-        )
-
-        for ((wrong, right) in dictionaryFixes) {
-            result = result.replace(wrong, right)
-        }
-
-        val regex = Regex("""([\u0621-\u063A\u0641-\u064A\u067E\u0686\u06AF\u06A9\u06CC])ال([\u0621-\u064A\u067E\u0686\u06AF\u06A9\u06CC])""")
-        result = regex.replace(result) { match ->
-            "${match.groupValues[1]}لا${match.groupValues[2]}"
-        }
-
-        return result
+        return PersianFontDecoder.fixLamAlefInversion(text)
     }
 
     private fun normalizeDigitsAndSpacing(text: String): String {
         if (text.isBlank()) return text
-
-        val nfkc = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
-
-        return nfkc
-            .replace('ي', 'ی')
-            .replace('ى', 'ی')
-            .replace('ك', 'ک')
-            .replace('ة', 'ه')
-            .replace('أ', 'ا')
-            .replace('إ', 'ا')
-            .replace('ٱ', 'ا')
-            .replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3').replace('۴', '4')
-            .replace('۵', '5').replace('۶', '6').replace('۷', '7').replace('۸', '8').replace('۹', '9')
-            .replace('٠', '0').replace('١', '1').replace('٢', '2').replace('٣', '3').replace('٤', '4')
-            .replace('٥', '5').replace('٦', '6').replace('٧', '7').replace('٨', '8').replace('٩', '9')
-            .replace("\u200B", "")
-            .replace("\u00A0", " ")
-            .replace("\uFEFF", "")
-            .replace("\u200E", "")
-            .replace("\u200F", "")
-            .replace(Regex("""\s*\u200C\s*"""), "\u200C")
-            .replace(Regex("""\u200C+"""), "\u200C")
-            .replace("یک\u200Cشنبه", "یکشنبه")
-            .replace("یک شنبه", "یکشنبه")
-            .replace("یک‌شنبه", "یکشنبه")
-            .replace("يكشنبه", "یکشنبه")
-            .replace("دو\u200Cشنبه", "دوشنبه")
-            .replace("دو شنبه", "دوشنبه")
-            .replace("سه\u200Cشنبه", "سه‌شنبه")
-            .replace("سه شنبه", "سه‌شنبه")
-            .replace("سه‌ شنبه", "سه‌شنبه")
-            .replace("چهار\u200Cشنبه", "چهارشنبه")
-            .replace("چهار شنبه", "چهارشنبه")
-            .replace("پنج\u200Cشنبه", "پنجشنبه")
-            .replace("پنج شنبه", "پنجشنبه")
+        return PersianFontDecoder.decodeAndNormalize(text)
     }
 
     private fun cleanCourseTitle(text: String): String {

@@ -24,9 +24,9 @@ data class AppConfigRemote(
     @SerialName("is_week_flipped")
     val isWeekFlipped: Boolean = false,
     @SerialName("latest_version_code")
-    val latestVersionCode: Int = 1,
+    val latestVersionCode: Int = 2,
     @SerialName("latest_version_name")
-    val latestVersionName: String = "1.0.0",
+    val latestVersionName: String = "1.1",
     @SerialName("download_url")
     val downloadUrl: String? = null,
     @SerialName("release_notes")

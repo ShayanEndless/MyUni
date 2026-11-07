@@ -10,7 +10,7 @@ object AppUpdateHelper {
     fun openMarket(context: Context, url: String?) {
         try {
             val targetUrl = if (url.isNullOrBlank()) {
-                "https://cafebazaar.ir/app/${context.packageName}"
+                "https://myket.ir/app/${context.packageName}"
             } else {
                 url
             }

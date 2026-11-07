@@ -441,7 +441,8 @@ private fun handleBatchTableDataChange(
     changes: List<Pair<String, String>>,
     currentScheduleMode: String,
     tableData: MutableMap<String, String>,
-    prefs: SharedPreferences
+    prefs: SharedPreferences,
+    isWeekParityFlipped: Boolean = false
 ) {
     val editor = prefs.edit()
 
@@ -466,7 +467,14 @@ private fun handleBatchTableDataChange(
                 val golestanHour = when (currentScheduleMode) {
                     "holding_even" -> baseHour + 1
                     "holding_odd" -> baseHour
-                    else -> baseHour
+                    else -> {
+                        if (currentScheduleMode.startsWith("holding")) {
+                            val isEven = isEvenWeekContinuous(isWeekFlipped = isWeekParityFlipped)
+                            if (isEven) baseHour + 1 else baseHour
+                        } else {
+                            baseHour
+                        }
+                    }
                 }
 
                 val mappedKey = "${type}_${day}_$golestanHour"
@@ -532,9 +540,10 @@ private fun handleTableDataChange(
     value: String,
     currentScheduleMode: String,
     tableData: MutableMap<String, String>,
-    prefs: SharedPreferences
+    prefs: SharedPreferences,
+    isWeekParityFlipped: Boolean = false
 ) {
-    handleBatchTableDataChange(listOf(rawKey to value), currentScheduleMode, tableData, prefs)
+    handleBatchTableDataChange(listOf(rawKey to value), currentScheduleMode, tableData, prefs, isWeekParityFlipped)
 }
 
 data class DraggedCourseInfo(
@@ -612,6 +621,13 @@ private fun performCourseSwapOrMove(
     onBatchValueChange(changes)
 }
 
+data class CourseOptionInfo(
+    val title: String,
+    val blockKey: String,
+    val roomKey: String,
+    val roomText: String
+)
+
 @Composable
 fun ScheduleTable(
     tableData: Map<String, String>,
@@ -622,11 +638,13 @@ fun ScheduleTable(
     isEditingMode: Boolean = (scheduleMode == "golestan"),
     isOverallMode: Boolean = (scheduleMode == "golestan_all"),
     isWeekFlipped: Boolean,
+    currentTime: Calendar = remember { Calendar.getInstance().apply { firstDayOfWeek = Calendar.SATURDAY } },
     onValueChange: (String, String) -> Unit,
     onBatchValueChange: (List<Pair<String, String>>) -> Unit = { changes ->
         changes.forEach { onValueChange(it.first, it.second) }
     },
     onAddDeadline: (String) -> Unit = {},
+    onScheduleModeChange: (String) -> Unit = {},
     onTableSettingsRequest: () -> Unit = {},
     onEditActiveDaysClick: () -> Unit = {},
     onEditActiveHoursClick: () -> Unit = {},
@@ -634,41 +652,6 @@ fun ScheduleTable(
     onReturnToEvenOddMode: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var clickedCourseForOptions by remember { mutableStateOf<String?>(null) }
-
-    if (clickedCourseForOptions != null) {
-        val courseTitle = clickedCourseForOptions!!
-        RtlAlertDialog(
-            onDismissRequest = { clickedCourseForOptions = null },
-            title = {
-                Text(
-                    text = "درس: $courseTitle",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = selectedColor
-                )
-            },
-            text = {
-                Text("آیا می‌خواهید برای این درس ددلاین جدیدی ایجاد کنید؟", fontSize = 13.sp)
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        clickedCourseForOptions = null
-                        onAddDeadline(courseTitle)
-                    },
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("افزودن ددلاین", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { clickedCourseForOptions = null }) {
-                    Text("لغو")
-                }
-            }
-        )
-    }
 
     val lineThickness = AppConfig.lineThickness
     val lineAlpha = AppConfig.lineAlpha
@@ -683,6 +666,7 @@ fun ScheduleTable(
     var editingTextValue by remember { mutableStateOf(TextFieldValue("")) }
     var editingRoomTextValue by remember { mutableStateOf(TextFieldValue("")) }
     var isEditingRoom by remember { mutableStateOf(false) }
+    var isSingleCourseEdit by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
@@ -691,23 +675,88 @@ fun ScheduleTable(
     var dragPositionInWindow by remember { mutableStateOf(Offset.Zero) }
     var targetCell by remember { mutableStateOf<Pair<String, String>?>(null) }
 
+    var clickedCourseForOptions by remember { mutableStateOf<CourseOptionInfo?>(null) }
+
+    if (clickedCourseForOptions != null) {
+        val info = clickedCourseForOptions!!
+        RtlAlertDialog(
+            onDismissRequest = { clickedCourseForOptions = null },
+            title = {
+                Text(
+                    text = "درس: ${info.title}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = selectedColor
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("لطفاً یکی از گزینه‌های زیر را انتخاب کنید:", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // 1. افزودن ددلاین (Top)
+                    Button(
+                        onClick = {
+                            clickedCourseForOptions = null
+                            onAddDeadline(info.title)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("افزودن ددلاین", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    // 2. ویرایش درس (Middle)
+                    Button(
+                        onClick = {
+                            clickedCourseForOptions = null
+                            isSingleCourseEdit = true
+                            onScheduleModeChange("golestan")
+                            editingBlockKey = info.blockKey
+                            val currentText = tableData[info.blockKey] ?: info.title
+                            editingText = currentText
+                            editingTextValue = TextFieldValue(text = currentText, selection = TextRange(currentText.length))
+                            val currentRoomText = tableData[info.roomKey] ?: info.roomText
+                            editingRoomText = currentRoomText
+                            editingRoomTextValue = TextFieldValue(text = currentRoomText, selection = TextRange(currentRoomText.length))
+                            isEditingRoom = false
+                            selectingDurationKey = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("ویرایش درس", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    // 3. لغو (Bottom)
+                    OutlinedButton(
+                        onClick = { clickedCourseForOptions = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("لغو", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            },
+            confirmButton = null,
+            dismissButton = null
+        )
+    }
+
     val cellBounds = remember { mutableStateMapOf<Pair<String, String>, Rect>() }
     val cellRects = remember { mutableStateMapOf<Pair<String, String>, Rect>() }
     var rootCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var tableRootBounds by remember { mutableStateOf<Rect?>(null) }
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
-
-    // Real-time tracking
-    var currentTime by remember {
-        mutableStateOf(Calendar.getInstance().apply { firstDayOfWeek = Calendar.SATURDAY })
-    }
-    LaunchedEffect(Unit) {
-        while (true) {
-            currentTime = Calendar.getInstance().apply { firstDayOfWeek = Calendar.SATURDAY }
-            delay(30000L) // Refresh every 30 seconds
-        }
-    }
 
     val isCurrentWeekEven = isEvenWeekContinuous(currentTime.timeInMillis, isWeekFlipped)
 
@@ -1107,9 +1156,7 @@ fun ScheduleTable(
                                                     Modifier.clickable {
                                                         if (!isBeingDragged) {
                                                             val courseTitle = text?.lines()?.firstOrNull()?.trim() ?: ""
-                                                            if (courseTitle.isNotBlank()) {
-                                                                clickedCourseForOptions = courseTitle
-                                                            } else if (scheduleMode == "golestan") {
+                                                            if (isEditingMode) {
                                                                 editingBlockKey = key
                                                                 val currentText = text ?: ""
                                                                 editingText = currentText
@@ -1119,6 +1166,25 @@ fun ScheduleTable(
                                                                 editingRoomTextValue = TextFieldValue(text = currentRoomText, selection = TextRange(currentRoomText.length))
                                                                 isEditingRoom = false
                                                                 selectingDurationKey = null
+                                                            } else {
+                                                                if (courseTitle.isNotBlank()) {
+                                                                    clickedCourseForOptions = CourseOptionInfo(
+                                                                        title = courseTitle,
+                                                                        blockKey = key,
+                                                                        roomKey = roomKey,
+                                                                        roomText = tableData[roomKey] ?: ""
+                                                                    )
+                                                                } else if (scheduleMode == "golestan") {
+                                                                    editingBlockKey = key
+                                                                    val currentText = text ?: ""
+                                                                    editingText = currentText
+                                                                    editingTextValue = TextFieldValue(text = currentText, selection = TextRange(currentText.length))
+                                                                    val currentRoomText = tableData[roomKey] ?: ""
+                                                                    editingRoomText = currentRoomText
+                                                                    editingRoomTextValue = TextFieldValue(text = currentRoomText, selection = TextRange(currentRoomText.length))
+                                                                    isEditingRoom = false
+                                                                    selectingDurationKey = null
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -1173,6 +1239,10 @@ fun ScheduleTable(
                                                                 }
                                                                 editingBlockKey = null
                                                                 focusManager.clearFocus()
+                                                                if (isSingleCourseEdit) {
+                                                                    isSingleCourseEdit = false
+                                                                    onScheduleModeChange("holding_auto")
+                                                                }
                                                             }),
                                                             decorationBox = { innerTextField ->
                                                                 if (editingRoomTextValue.text.isEmpty()) Text("شماره کلاس", color = Color.White.copy(alpha = 0.5f), fontSize = (blockFontSize.value - 1).sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
@@ -1215,6 +1285,10 @@ fun ScheduleTable(
                                                                 editingBlockKey = null
                                                             }
                                                             focusManager.clearFocus()
+                                                            if (isSingleCourseEdit) {
+                                                                isSingleCourseEdit = false
+                                                                onScheduleModeChange("holding_auto")
+                                                            }
                                                         },
                                                     contentAlignment = Alignment.Center
                                                 ) {
@@ -2464,6 +2538,7 @@ fun openContactLink(context: Context, label: String, value: String) {
         "ایتا" -> "https://eitaa.com/${value.removePrefix("@").trim()}"
         "تلگرام" -> "https://t.me/${value.removePrefix("@").trim()}"
         "شماره تماس" -> "tel:${value.trim()}"
+        "گیت‌هاب" -> value.trim()
         else -> "mailto:${value.trim()}"
     }
     if (label == "تلگرام") {
@@ -3250,12 +3325,31 @@ fun MainScreen(
         }
     }
 
-    val effectiveTableData = remember(tableData.toMap(), scheduleMode, activeDays) {
+    var currentTime by remember {
+        mutableStateOf(Calendar.getInstance().apply { firstDayOfWeek = Calendar.SATURDAY })
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = Calendar.getInstance().apply { firstDayOfWeek = Calendar.SATURDAY }
+            delay(30000L) // Refresh every 30 seconds
+        }
+    }
+
+    val isCurrentWeekEven = remember(currentTime, isWeekParityFlipped) {
+        isEvenWeekContinuous(currentTime.timeInMillis, isWeekParityFlipped)
+    }
+
+    val effectiveTableData = remember(tableData.toMap(), scheduleMode, activeDays, isCurrentWeekEven) {
         when (scheduleMode) {
-            "holding_even" -> getHoldingTableData(tableData, isEvenWeek = true, activeDays)
-            "holding_odd" -> getHoldingTableData(tableData, isEvenWeek = false, activeDays)
             "holding_all" -> getHoldingTableData(tableData, isEvenWeek = null, activeDays)
-            else -> tableData
+            "golestan" -> tableData
+            else -> {
+                if (scheduleMode.startsWith("holding")) {
+                    getHoldingTableData(tableData, isEvenWeek = isCurrentWeekEven, activeDays)
+                } else {
+                    tableData
+                }
+            }
         }
     }
 
@@ -3328,8 +3422,7 @@ fun MainScreen(
             prefs.edit().putBoolean("is_setup_completed", true).apply()
             isSetupCompleted = true
 
-            val finalIsEven = isEvenWeekContinuous(isWeekFlipped = isWeekParityFlipped)
-            val autoHoldingMode = if (finalIsEven) "holding_even" else "holding_odd"
+            val autoHoldingMode = "holding_auto"
             scheduleMode = autoHoldingMode
             prefs.edit().putString("schedule_mode", autoHoldingMode).apply()
 
@@ -4028,19 +4121,24 @@ fun MainScreen(
                                         isEditingMode = (scheduleMode == "golestan"),
                                         isOverallMode = (scheduleMode == "golestan_all"),
                                         isWeekFlipped = isWeekParityFlipped,
+                                        currentTime = currentTime,
                                         onValueChange = { key, value ->
-                                            handleTableDataChange(key, value, scheduleMode, tableData, prefs)
+                                            handleTableDataChange(key, value, scheduleMode, tableData, prefs, isWeekParityFlipped)
                                             scheduleFoodReservationAlarm(context, tableData)
                                             scheduleClassNotifications(context, tableData)
                                         },
                                         onBatchValueChange = { changes ->
-                                            handleBatchTableDataChange(changes, scheduleMode, tableData, prefs)
+                                            handleBatchTableDataChange(changes, scheduleMode, tableData, prefs, isWeekParityFlipped)
                                             scheduleFoodReservationAlarm(context, tableData)
                                             scheduleClassNotifications(context, tableData)
                                         },
                                         onAddDeadline = { courseTitle ->
                                             prefilledDeadlineCourse = courseTitle
                                             currentTab = 1
+                                        },
+                                        onScheduleModeChange = { newMode ->
+                                            scheduleMode = newMode
+                                            prefs.edit().putString("schedule_mode", newMode).apply()
                                         },
                                         onTableSettingsRequest = {
                                             showTableSettingsDialog = true
@@ -4052,15 +4150,13 @@ fun MainScreen(
                                             showActiveHoursDialog = true
                                         },
                                         onConfirmEditClick = {
-                                            val finalIsEven = isEvenWeekContinuous(isWeekFlipped = isWeekParityFlipped)
-                                            val autoHoldingMode = if (finalIsEven) "holding_even" else "holding_odd"
+                                            val autoHoldingMode = "holding_auto"
                                             scheduleMode = autoHoldingMode
                                             prefs.edit().putString("schedule_mode", autoHoldingMode).apply()
                                             Toast.makeText(context, "تغییرات ذخیره شد", Toast.LENGTH_SHORT).show()
                                         },
                                         onReturnToEvenOddMode = {
-                                            val finalIsEven = isEvenWeekContinuous(isWeekFlipped = isWeekParityFlipped)
-                                            val autoHoldingMode = if (finalIsEven) "holding_even" else "holding_odd"
+                                            val autoHoldingMode = "holding_auto"
                                             scheduleMode = autoHoldingMode
                                             prefs.edit().putString("schedule_mode", autoHoldingMode).apply()
                                             Toast.makeText(context, "به حالت هفته زوج و فرد بازگشتید", Toast.LENGTH_SHORT).show()
@@ -4858,6 +4954,112 @@ fun MainScreen(
                                                         }
                                                     }
                                                     if (rowChannels.size == 1) {
+                                                        Spacer(modifier = Modifier.weight(1f))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ==========================================
+                            // ۲.۵. کادر پشتیبانی مای یونی
+                            // ==========================================
+                            val isExpandedSupport = expandedSitesSection == 6
+                            val arrowRotationSupport by animateFloatAsState(
+                                targetValue = if (isExpandedSupport) 180f else 0f,
+                                animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                                label = "arrowRotationSupport"
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = selectedColor.copy(alpha = 0.06f),
+                                border = BorderStroke(1.5.dp, selectedColor.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                expandedSitesSection = if (isExpandedSupport) null else 6
+                                            },
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "پشتیبانی مای یونی",
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.graphicsLayer { rotationZ = arrowRotationSupport }
+                                        )
+                                    }
+
+                                    AnimatedVisibility(
+                                        visible = isExpandedSupport,
+                                        enter = expandVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)),
+                                        exit = shrinkVertically(animationSpec = tween(250, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(200, easing = FastOutSlowInEasing))
+                                    ) {
+                                        val supportItems = listOf(
+                                            Triple("تلگرام", Pair("تلگرام", "@shayanendless"), Color(0xFF0088CC)),
+                                            Triple("ایتا", Pair("ایتا", "@shayanendless"), Color(0xFFE65100)),
+                                            Triple("ایمیل", Pair("ایمیل", "shayanendless@gmail.com"), Color(0xFFEA4335)),
+                                            Triple("گیت‌هاب", Pair("گیت‌هاب", "https://github.com/ShayanEndless/MyUni.git"), Color(0xFF24292E))
+                                        )
+
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clipToBounds()
+                                                .padding(top = 12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            supportItems.chunked(2).forEach { rowItems ->
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    rowItems.forEach { (displayTitle, contactPair, btnColor) ->
+                                                        val (label, value) = contactPair
+                                                        ThreeDButton(
+                                                            onClick = {
+                                                                openContactLink(context, label, value)
+                                                            },
+                                                            baseColor = btnColor,
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .height(65.dp)
+                                                        ) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .fillMaxSize()
+                                                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Text(
+                                                                    text = displayTitle,
+                                                                    fontSize = 14.5.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    color = Color.White,
+                                                                    textAlign = TextAlign.Center,
+                                                                    maxLines = 1
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    if (rowItems.size == 1) {
                                                         Spacer(modifier = Modifier.weight(1f))
                                                     }
                                                 }
@@ -5819,8 +6021,7 @@ fun TableSettingsContent(
             color = selectedColor,
             onClick = {
                 if (isOverallMode) {
-                    val finalIsEven = isEvenWeekContinuous(isWeekFlipped = isWeekParityFlipped)
-                    val autoHoldingMode = if (finalIsEven) "holding_even" else "holding_odd"
+                    val autoHoldingMode = "holding_auto"
                     onScheduleModeChange(autoHoldingMode)
                     Toast.makeText(context, "به حالت هفته زوج و فرد بازگشتید", Toast.LENGTH_SHORT).show()
                 } else {
@@ -5839,8 +6040,7 @@ fun TableSettingsContent(
             color = MaterialTheme.colorScheme.onSurface,
             onClick = {
                 if (isEditingMode) {
-                    val finalIsEven = isEvenWeekContinuous(isWeekFlipped = isWeekParityFlipped)
-                    val autoHoldingMode = if (finalIsEven) "holding_even" else "holding_odd"
+                    val autoHoldingMode = "holding_auto"
                     onScheduleModeChange(autoHoldingMode)
                     Toast.makeText(context, "تغییرات ذخیره شد و به حالت مشاهده بازگشتید", Toast.LENGTH_SHORT).show()
                     onNavigateToSchedule()
@@ -7513,7 +7713,7 @@ fun PdfExtractionGuideDialog(
     var offsetY by remember(currentStep) { mutableStateOf(AppConfig.golestanGuideInitialOffsetY) }
 
     val stepsDescriptions = listOf(
-        "1: ابتدا وارد سایت گلستان شوید.",
+        "1: ابتدا با گوگل کروم وارد سایت گلستان شوید.",
         "2: گزارش ۷۳ را وارد و دکمه تایید را بزنید.",
         "3: گزینه \"مشاهده گزارش\" را بزنید.",
         "4: گزینه \"آماده‌سازی جهت چاپ\" را بزنید.",

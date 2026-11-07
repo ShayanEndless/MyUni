@@ -90,7 +90,7 @@ fun AppUpdateDialog(
                     },
                     shape = RoundedCornerShape(AppConfig.dialogButtonCornerRadius)
                 ) {
-                    Text("به‌روزرسانی از بازار", fontSize = AppConfig.dialogButtonFontSize)
+                    Text("دانلود و به‌روزرسانی", fontSize = AppConfig.dialogButtonFontSize)
                 }
             },
             dismissButton = {
