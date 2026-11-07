@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ShayanEndless/MyUni/releases/latest">
+  <a href="https://github.com/ShayanEndless/MyUni.git">
     <img src="https://img.shields.io/badge/📥_دانلود_مستقیم_فایل_APK-v1.1-2EA44F?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" />
   </a>
 </p>
