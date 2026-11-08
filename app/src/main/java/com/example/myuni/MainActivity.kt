@@ -142,6 +142,9 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
@@ -4963,111 +4966,7 @@ fun MainScreen(
                                 }
                             }
 
-                            // ==========================================
-                            // ۲.۵. کادر پشتیبانی مای یونی
-                            // ==========================================
-                            val isExpandedSupport = expandedSitesSection == 6
-                            val arrowRotationSupport by animateFloatAsState(
-                                targetValue = if (isExpandedSupport) 180f else 0f,
-                                animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
-                                label = "arrowRotationSupport"
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = selectedColor.copy(alpha = 0.06f),
-                                border = BorderStroke(1.5.dp, selectedColor.copy(alpha = 0.4f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(14.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null
-                                            ) {
-                                                expandedSitesSection = if (isExpandedSupport) null else 6
-                                            },
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "پشتیبانی مای یونی",
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Default.KeyboardArrowDown,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.graphicsLayer { rotationZ = arrowRotationSupport }
-                                        )
-                                    }
 
-                                    AnimatedVisibility(
-                                        visible = isExpandedSupport,
-                                        enter = expandVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)),
-                                        exit = shrinkVertically(animationSpec = tween(250, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(200, easing = FastOutSlowInEasing))
-                                    ) {
-                                        val supportItems = listOf(
-                                            Triple("تلگرام", Pair("تلگرام", "@shayanendless"), Color(0xFF0088CC)),
-                                            Triple("ایتا", Pair("ایتا", "@shayanendless"), Color(0xFFE65100)),
-                                            Triple("ایمیل", Pair("ایمیل", "shayanendless@gmail.com"), Color(0xFFEA4335)),
-                                            Triple("گیت‌هاب", Pair("گیت‌هاب", "https://github.com/ShayanEndless/MyUni.git"), Color(0xFF24292E))
-                                        )
-
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clipToBounds()
-                                                .padding(top = 12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            supportItems.chunked(2).forEach { rowItems ->
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                                ) {
-                                                    rowItems.forEach { (displayTitle, contactPair, btnColor) ->
-                                                        val (label, value) = contactPair
-                                                        ThreeDButton(
-                                                            onClick = {
-                                                                openContactLink(context, label, value)
-                                                            },
-                                                            baseColor = btnColor,
-                                                            modifier = Modifier
-                                                                .weight(1f)
-                                                                .height(65.dp)
-                                                        ) {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .fillMaxSize()
-                                                                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                                                                contentAlignment = Alignment.Center
-                                                            ) {
-                                                                Text(
-                                                                    text = displayTitle,
-                                                                    fontSize = 14.5.sp,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    color = Color.White,
-                                                                    textAlign = TextAlign.Center,
-                                                                    maxLines = 1
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                    if (rowItems.size == 1) {
-                                                        Spacer(modifier = Modifier.weight(1f))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
 
                             // ==========================================
                             // ۳. کادر گزارش‌های گلستان
@@ -5407,9 +5306,11 @@ fun MainScreen(
                         }
                     }
                     3 -> {
+                        val settingsScrollState = rememberScrollState()
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .verticalScroll(settingsScrollState)
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -5576,7 +5477,16 @@ fun MainScreen(
                                 }
                             }
 
-                            // کادر تنظیمات جدول درسی
+                            // ==========================================
+                            // کادر تنظیمات جدول درسی (کشویی)
+                            // ==========================================
+                            var isExpandedTableSettings by remember { mutableStateOf(false) }
+                            val arrowRotationTableSettings by animateFloatAsState(
+                                targetValue = if (isExpandedTableSettings) 180f else 0f,
+                                animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                                label = "arrowRotationTableSettings"
+                            )
+
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = selectedColor.copy(alpha = 0.06f),
@@ -5584,46 +5494,270 @@ fun MainScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier = Modifier.padding(14.dp)
                                 ) {
-                                    Text(
-                                        text = AppConfig.DialogTexts.tableSettingsTitle,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                isExpandedTableSettings = !isExpandedTableSettings
+                                            },
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = AppConfig.DialogTexts.tableSettingsTitle,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.graphicsLayer { rotationZ = arrowRotationTableSettings }
+                                        )
+                                    }
 
-                                    TableSettingsContent(
-                                        selectedColor = selectedColor,
-                                        scheduleMode = scheduleMode,
-                                        onScheduleModeChange = { newMode ->
-                                            scheduleMode = newMode
-                                            prefs.edit().putString("schedule_mode", newMode).apply()
-                                        },
-                                        isWeekParityFlipped = isWeekParityFlipped,
-                                        onWeekParityFlip = { flipped ->
-                                            isWeekParityFlipped = flipped
-                                            prefs.edit().putBoolean("isWeekParityFlipped", flipped).apply()
-                                        },
-                                        onGolestanSyncClick = {
-                                            showGolestanSyncDialog = true
-                                            currentTab = 0
-                                        },
-                                        onPdfExtractClick = {
-                                            showPdfGuideDialog = true
-                                        },
-                                        onClearAllClick = {
-                                            showClearConfirmDialog = true
-                                        },
-                                        onNavigateToSchedule = {
-                                            currentTab = 0
+                                    AnimatedVisibility(
+                                        visible = isExpandedTableSettings,
+                                        enter = expandVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)),
+                                        exit = shrinkVertically(animationSpec = tween(250, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(200, easing = FastOutSlowInEasing))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            TableSettingsContent(
+                                                selectedColor = selectedColor,
+                                                scheduleMode = scheduleMode,
+                                                onScheduleModeChange = { newMode ->
+                                                    scheduleMode = newMode
+                                                    prefs.edit().putString("schedule_mode", newMode).apply()
+                                                },
+                                                isWeekParityFlipped = isWeekParityFlipped,
+                                                onWeekParityFlip = { flipped ->
+                                                    isWeekParityFlipped = flipped
+                                                    prefs.edit().putBoolean("isWeekParityFlipped", flipped).apply()
+                                                },
+                                                onGolestanSyncClick = {
+                                                    showGolestanSyncDialog = true
+                                                    currentTab = 0
+                                                },
+                                                onPdfExtractClick = {
+                                                    showPdfGuideDialog = true
+                                                },
+                                                onClearAllClick = {
+                                                    showClearConfirmDialog = true
+                                                },
+                                                onNavigateToSchedule = {
+                                                    currentTab = 0
+                                                }
+                                            )
                                         }
-                                    )
+                                    }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(20.dp))
+                            // ==========================================
+                            // کادر پشتیبانی مای یونی (کشویی)
+                            // ==========================================
+                            var isExpandedSupport by remember { mutableStateOf(false) }
+                            val arrowRotationSupport by animateFloatAsState(
+                                targetValue = if (isExpandedSupport) 180f else 0f,
+                                animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                                label = "arrowRotationSupport"
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = selectedColor.copy(alpha = 0.06f),
+                                border = BorderStroke(1.5.dp, selectedColor.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                isExpandedSupport = !isExpandedSupport
+                                            },
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "پشتیبانی مای یونی",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.graphicsLayer { rotationZ = arrowRotationSupport }
+                                        )
+                                    }
+
+                                    AnimatedVisibility(
+                                        visible = isExpandedSupport,
+                                        enter = expandVertically(animationSpec = tween(280, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)),
+                                        exit = shrinkVertically(animationSpec = tween(250, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(200, easing = FastOutSlowInEasing))
+                                    ) {
+                                        val supportItems = listOf(
+                                            Triple("تلگرام", Pair("تلگرام", "@shayanendless"), Color(0xFF0088CC)),
+                                            Triple("ایتا", Pair("ایتا", "@shayanendless"), Color(0xFFE65100)),
+                                            Triple("ایمیل", Pair("ایمیل", "shayanendless@gmail.com"), Color(0xFFEA4335)),
+                                            Triple("گیت‌هاب", Pair("گیت‌هاب", "https://github.com/ShayanEndless/MyUni.git"), Color(0xFF24292E))
+                                        )
+
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            supportItems.chunked(2).forEach { rowItems ->
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    rowItems.forEach { (displayTitle, contactPair, btnColor) ->
+                                                        val (label, value) = contactPair
+                                                        ThreeDButton(
+                                                            onClick = {
+                                                                openContactLink(context, label, value)
+                                                            },
+                                                            baseColor = btnColor,
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .height(55.dp)
+                                                        ) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .fillMaxSize()
+                                                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Text(
+                                                                    text = displayTitle,
+                                                                    fontSize = 14.5.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    color = Color.White,
+                                                                    textAlign = TextAlign.Center,
+                                                                    maxLines = 1
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    if (rowItems.size == 1) {
+                                                        Spacer(modifier = Modifier.weight(1f))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ==========================================
+                            // کادر بررسی نسخه جدید (Supabase App Update)
+                            // ==========================================
+                            var isCheckingUpdate by remember { mutableStateOf(false) }
+                            val updateCoroutineScope = rememberCoroutineScope()
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = selectedColor.copy(alpha = 0.06f),
+                                border = BorderStroke(1.5.dp, selectedColor.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = !isCheckingUpdate) {
+                                            isCheckingUpdate = true
+                                            Toast.makeText(context, "در حال بررسی نسخه جدید...", Toast.LENGTH_SHORT).show()
+                                            updateCoroutineScope.launch {
+                                                val configResult = SupabaseRepository.fetchAppConfig()
+                                                isCheckingUpdate = false
+                                                val config = configResult.getOrNull()
+                                                if (config != null) {
+                                                    remoteAppConfig = config
+                                                    if (config.latestVersionCode > BuildConfig.VERSION_CODE) {
+                                                        showAppUpdateDialog = true
+                                                    } else {
+                                                        Toast.makeText(context, "شما از آخرین نسخه برنامه استفاده می‌کنید.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } else {
+                                                    Toast.makeText(context, "خطا در برقراری ارتباط با سرور.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SystemUpdate,
+                                            contentDescription = null,
+                                            tint = selectedColor,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Text(
+                                            text = "بررسی نسخه جدید",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    if (isCheckingUpdate) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            color = selectedColor,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // ==========================================
+                            // نمایش نسخه اپلیکیشن در ته ته تنظیمات
+                            // ==========================================
+                            val currentAppVersion = remember {
+                                SupabaseRepository.getAppVersionName(context)
+                            }
+                            Text(
+                                text = "نسخه برنامه: $currentAppVersion",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(bottom = 120.dp)
+                            )
                         }
                     }
                 }
