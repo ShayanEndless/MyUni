@@ -64,6 +64,13 @@ object AppConfig {
     val bottomBarHaloAlpha: Float = 0.18f         // میزان شفافیت پس‌زمینه هاله
 
     // ==========================================
+    // تنظیمات پدینگ کلی صفحات برنامه (Global Screen Layout)
+    // ==========================================
+    val screenTopPadding: Dp = 37.dp            // فاصله ثابت همه بخش‌های برنامه از بالای صفحه (زیر نوار وضعیت)
+    val scheduleTopPadding: Dp get() = screenTopPadding
+    val scheduleBottomPadding: Dp = bottomBarHeight + bottomBarBottomPadding + 8.dp  // فاصله کادر برنامه درسی از پایین صفحه (کمی بالاتر از نوار 4 دکمه اصلی)
+
+    // ==========================================
     // 6. تنظیمات سرعت انیمیشن جابجایی تب‌ها (Tab Transition Speed)
     // ==========================================
     val tabTransitionDurationMillis: Int = 185    // مدت زمان انیمیشن جابجایی صفحات (میلی‌ثانیه) - عدد کمتر = سرعت بیشتر
@@ -77,7 +84,7 @@ object AppConfig {
     // ==========================================
     // 8. تنظیمات اختصاصی سکشن‌های داشبورد (Dashboard Sections Layout)
     // ==========================================
-    val dashboardTopPadding: Dp = 10.dp           // فاصله از بالای صفحه داشبورد
+    val dashboardTopPadding: Dp get() = screenTopPadding           // فاصله از بالای صفحه داشبورد
 
     // --- سکشن ۱: کادر و اساتید ---
     val staffSectionTopSpacing: Dp = 0.dp         // فاصله بالای سکشن کادر و اساتید

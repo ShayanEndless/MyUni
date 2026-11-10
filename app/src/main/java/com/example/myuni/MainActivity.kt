@@ -3,7 +3,9 @@ package com.example.myuni
 import com.example.myuni.R
 import com.example.myuni.supabase.AppConfigRemote
 import com.example.myuni.supabase.AppUpdateDialog
+import com.example.myuni.supabase.ForceUpdateScreen
 import com.example.myuni.supabase.SupabaseRepository
+import com.example.myuni.ui.theme.MyUniTheme
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -1727,8 +1729,8 @@ fun DeadlinesScreen(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                color = selectedColor.copy(alpha = 0.08f),
-                border = BorderStroke(1.dp, selectedColor.copy(alpha = 0.2f))
+                color = selectedColor.copy(alpha = 0.06f),
+                border = BorderStroke(1.5.dp, selectedColor.copy(alpha = 0.4f))
             ) {
                 Row(
                     modifier = Modifier
@@ -1932,7 +1934,7 @@ fun DeadlinesScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(110.dp))
                     }
                 }
             }
@@ -2734,22 +2736,22 @@ fun loadContacts(context: Context): List<ContactInfo> {
         ContactInfo(
             id = "c2_lotfi",
             title = "امور آزمایشگاه",
-            name = "لطفی",
+            name = "آقای لطفی",
             phone = "09300982275"
         ),
         ContactInfo(
             title = "امور خوابگاه",
-            name = "کسائی",
+            name = "آقای کسائی",
             telegram = "@Kasaie7"
         ),
         ContactInfo(
             title = "امور آزمایشگاه",
-            name = "عسگری",
+            name = "آقای عسگری",
             phone = "09015270112"
         ),
         ContactInfo(
             title = "حراست",
-            name = "مدنی",
+            name = "آقای مدنی",
             phone = "09966129958"
         ),
         ContactInfo(
@@ -2759,23 +2761,23 @@ fun loadContacts(context: Context): List<ContactInfo> {
         ),
         ContactInfo(
             title = "خدمات آموزشی",
-            name = "علیدادی",
+            name = "آقای علیدادی",
             telegram = "@Ahmad_27"
         ),
         ContactInfo(
             title = "امور آموزش",
-            name = "رفعت",
+            name = "آقای رفعت",
             eitaa = "@Sadegh140000"
         ),
         ContactInfo(
             title = "امور پژوهش",
-            name = "مهرداد قریشی",
+            name = "آقای قریشی",
             telegram = "@SMGH77",
             eitaa = "@SMGH77"
         ),
         ContactInfo(
             title = "فناوری اطلاعات",
-            name = "مجید منصف",
+            name = "آقای منصف",
             phone = "09133229800"
         ),
         ContactInfo(
@@ -2844,7 +2846,7 @@ fun loadContacts(context: Context): List<ContactInfo> {
         ContactInfo(
             title = "استاد",
             name = "روزمند",
-            telegram = "@OR23451",
+            telegram = "@roozmandomid",
             email = "roozmand@gmail.com"
         ),
         ContactInfo(
@@ -3205,7 +3207,6 @@ fun MainScreen(
     var showFirstTimeDialog by remember { mutableStateOf(false) }
     var showGolestanMessageDialog by remember { mutableStateOf(false) }
     var showAddScheduleChoiceDialog by remember { mutableStateOf(false) }
-    var showGolestanSyncDialog by remember { mutableStateOf(false) }
     var showPdfGuideDialog by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
@@ -3240,6 +3241,20 @@ fun MainScreen(
     var showAppUpdateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        // بررسی کش محلی برای فورس‌آپدیت در همان روز (حتی اگر اپ بسته و دوباره باز شود)
+        val cachedVersionCode = prefs.getInt("cache_latest_version_code", BuildConfig.VERSION_CODE)
+        val cachedForceUpdate = prefs.getBoolean("cache_force_update", false)
+        if (cachedVersionCode > BuildConfig.VERSION_CODE && cachedForceUpdate) {
+            remoteAppConfig = AppConfigRemote(
+                latestVersionCode = cachedVersionCode,
+                latestVersionName = prefs.getString("cache_latest_version_name", "") ?: "",
+                downloadUrl = prefs.getString("cache_download_url", ""),
+                releaseNotes = prefs.getString("cache_release_notes", ""),
+                forceUpdate = cachedForceUpdate
+            )
+            showAppUpdateDialog = true
+        }
+
         val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
         val lastSyncDate = prefs.getString("last_server_sync_date", "")
 
@@ -3261,6 +3276,15 @@ fun MainScreen(
                 if (config.latestVersionCode > BuildConfig.VERSION_CODE) {
                     showAppUpdateDialog = true
                 }
+
+                // ذخیره در کش محلی جهت ماندگاری فورس آپدیت در ریستارت‌های همان روز
+                prefs.edit()
+                    .putInt("cache_latest_version_code", config.latestVersionCode)
+                    .putString("cache_latest_version_name", config.latestVersionName)
+                    .putBoolean("cache_force_update", config.forceUpdate)
+                    .putString("cache_download_url", config.downloadUrl ?: "")
+                    .putString("cache_release_notes", config.releaseNotes ?: "")
+                    .apply()
             }
 
             // ذخیره تاریخ امروز جهت جلوگیری از بروزرسانی مجدد در همان روز
@@ -3641,10 +3665,33 @@ fun MainScreen(
 
         remoteAppConfig?.let { config ->
             if (showAppUpdateDialog) {
-                AppUpdateDialog(
-                    config = config,
-                    onDismissRequest = { showAppUpdateDialog = false }
-                )
+                if (config.forceUpdate) {
+                    var isCheckingUpdate by remember { mutableStateOf(false) }
+                    val updateCoroutineScope = rememberCoroutineScope()
+                    ForceUpdateScreen(
+                        config = config,
+                        isChecking = isCheckingUpdate,
+                        onRecheckUpdate = {
+                            isCheckingUpdate = true
+                            updateCoroutineScope.launch {
+                                val configResult = SupabaseRepository.fetchAppConfig()
+                                isCheckingUpdate = false
+                                val newConfig = configResult.getOrNull()
+                                if (newConfig != null) {
+                                    remoteAppConfig = newConfig
+                                    if (newConfig.latestVersionCode <= BuildConfig.VERSION_CODE || !newConfig.forceUpdate) {
+                                        showAppUpdateDialog = false
+                                    }
+                                }
+                            }
+                        }
+                    )
+                } else {
+                    AppUpdateDialog(
+                        config = config,
+                        onDismissRequest = { showAppUpdateDialog = false }
+                    )
+                }
             }
         }
 
@@ -3883,10 +3930,6 @@ fun MainScreen(
                             isWeekParityFlipped = flipped
                             prefs.edit().putBoolean("isWeekParityFlipped", flipped).apply()
                         },
-                        onGolestanSyncClick = {
-                            showTableSettingsDialog = false
-                            showGolestanSyncDialog = true
-                        },
                         onPdfExtractClick = {
                             showTableSettingsDialog = false
                             showPdfGuideDialog = true
@@ -4029,7 +4072,6 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
             ) {
                 AnimatedContent(
                     targetState = currentTab,
@@ -4062,7 +4104,7 @@ fun MainScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
+                                .padding(start = 12.dp, end = 12.dp, top = innerPadding.calculateTopPadding() + 10.dp, bottom = innerPadding.calculateBottomPadding() + 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -4174,7 +4216,8 @@ fun MainScreen(
                             selectedColor = selectedColor,
                             tableData = effectiveTableData,
                             initialCourseName = prefilledDeadlineCourse,
-                            onConsumedInitialCourse = { prefilledDeadlineCourse = null }
+                            onConsumedInitialCourse = { prefilledDeadlineCourse = null },
+                            modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
                         )
                     }
                     2 -> {
@@ -4184,8 +4227,8 @@ fun MainScreen(
                                 .padding(
                                     start = 16.dp,
                                     end = 16.dp,
-                                    top = AppConfig.dashboardTopPadding,
-                                    bottom = 16.dp
+                                    top = innerPadding.calculateTopPadding() + 10.dp,
+                                    bottom = innerPadding.calculateBottomPadding() + 16.dp
                                 ),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -5306,15 +5349,21 @@ fun MainScreen(
                         }
                     }
                     3 -> {
+                        var isExpandedTableSettings by remember { mutableStateOf(false) }
+                        var isExpandedSupport by remember { mutableStateOf(false) }
                         val settingsScrollState = rememberScrollState()
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .verticalScroll(settingsScrollState)
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .verticalScroll(
+                                    settingsScrollState,
+                                    enabled = isExpandedTableSettings || isExpandedSupport
+                                )
+                                .padding(horizontal = 14.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            Spacer(modifier = Modifier.height(innerPadding.calculateTopPadding() + 10.dp))
                             NotificationSettingsCard(
                                 isClassNotificationEnabled = isClassNotificationEnabled,
                                 onClassNotificationChange = { newValue ->
@@ -5480,7 +5529,6 @@ fun MainScreen(
                             // ==========================================
                             // کادر تنظیمات جدول درسی (کشویی)
                             // ==========================================
-                            var isExpandedTableSettings by remember { mutableStateOf(false) }
                             val arrowRotationTableSettings by animateFloatAsState(
                                 targetValue = if (isExpandedTableSettings) 180f else 0f,
                                 animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
@@ -5545,10 +5593,6 @@ fun MainScreen(
                                                     isWeekParityFlipped = flipped
                                                     prefs.edit().putBoolean("isWeekParityFlipped", flipped).apply()
                                                 },
-                                                onGolestanSyncClick = {
-                                                    showGolestanSyncDialog = true
-                                                    currentTab = 0
-                                                },
                                                 onPdfExtractClick = {
                                                     showPdfGuideDialog = true
                                                 },
@@ -5567,7 +5611,6 @@ fun MainScreen(
                             // ==========================================
                             // کادر پشتیبانی مای یونی (کشویی)
                             // ==========================================
-                            var isExpandedSupport by remember { mutableStateOf(false) }
                             val arrowRotationSupport by animateFloatAsState(
                                 targetValue = if (isExpandedSupport) 180f else 0f,
                                 animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
@@ -5675,6 +5718,17 @@ fun MainScreen(
                             // ==========================================
                             var isCheckingUpdate by remember { mutableStateOf(false) }
                             val updateCoroutineScope = rememberCoroutineScope()
+                            val rawVersion = remember {
+                                SupabaseRepository.getAppVersionName(context)
+                            }
+                            val currentAppVersion = remember(rawVersion) {
+                                val parts = rawVersion.trim().split(".")
+                                when (parts.size) {
+                                    1 -> "${parts[0]}.0.0"
+                                    2 -> "${parts[0]}.${parts[1]}.0"
+                                    else -> rawVersion
+                                }
+                            }
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -5726,38 +5780,41 @@ fun MainScreen(
                                         )
                                     }
 
-                                    if (isCheckingUpdate) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(20.dp),
-                                            color = selectedColor,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = selectedColor.copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, selectedColor.copy(alpha = 0.4f))
+                                        ) {
+                                            Text(
+                                                text = currentAppVersion,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = selectedColor,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+
+                                        if (isCheckingUpdate) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = selectedColor,
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // ==========================================
-                            // نمایش نسخه اپلیکیشن در ته ته تنظیمات
-                            // ==========================================
-                            val currentAppVersion = remember {
-                                SupabaseRepository.getAppVersionName(context)
-                            }
-                            Text(
-                                text = "نسخه برنامه: $currentAppVersion",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(bottom = 120.dp)
-                            )
+                            Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding() + 80.dp))
                         }
                     }
                 }
@@ -6047,18 +6104,6 @@ fun MainScreen(
             )
         }
 
-        if (showGolestanSyncDialog) {
-            GolestanSyncDialog(
-                themeColor = selectedColor,
-                onCoursesExtracted = { courses ->
-                    showGolestanSyncDialog = false
-                    parsedCourses = courses
-                    showParsedCoursesDialog = true
-                },
-                onDismiss = { showGolestanSyncDialog = false }
-            )
-        }
-
         if (showPdfGuideDialog) {
             PdfExtractionGuideDialog(
                 onDismiss = { showPdfGuideDialog = false },
@@ -6102,7 +6147,7 @@ private fun SettingsOptionButton(
             .fillMaxWidth()
             .height(44.dp),
         shape = RoundedCornerShape(10.dp),
-        color = Color.Transparent,
+        color = color.copy(alpha = 0.12f),
         border = BorderStroke(1.5.dp, color.copy(alpha = 0.7f))
     ) {
         Row(
@@ -6135,7 +6180,6 @@ fun TableSettingsContent(
     onScheduleModeChange: (String) -> Unit,
     isWeekParityFlipped: Boolean,
     onWeekParityFlip: (Boolean) -> Unit,
-    onGolestanSyncClick: () -> Unit = {},
     onPdfExtractClick: () -> Unit,
     onClearAllClick: () -> Unit,
     onNavigateToSchedule: () -> Unit = {},

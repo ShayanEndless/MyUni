@@ -74,13 +74,7 @@ class CourseScheduleParserTest {
     fun testParseActualPdfFile() {
         val pdfFile1 = File("""C:\Users\Shayan Endless\Desktop\کليه صفحات ( 1صفحه ) آماده گرديد(1).PDF""")
         val pdfFile2 = File("D:/MyUni/app/src/main/assets/template.PDF")
-        val pdfFile3 = File("D:/MyUni/app/src/main/assets/scheduleB.pdf")
-        val targetFile = when {
-            pdfFile1.exists() -> pdfFile1
-            pdfFile2.exists() -> pdfFile2
-            pdfFile3.exists() -> pdfFile3
-            else -> null
-        }
+        val targetFile = if (pdfFile1.exists()) pdfFile1 else if (pdfFile2.exists()) pdfFile2 else null
         
         if (targetFile == null || !targetFile.exists()) {
             println("No test PDF file found.")
@@ -116,84 +110,14 @@ class CourseScheduleParserTest {
             }
             
             org.junit.Assert.assertTrue("Should parse courses", results.isNotEmpty())
-        }
-    }
-
-    @Test
-    fun testParseScheduleBPdf() {
-        val scheduleFile = File("D:/MyUni/app/src/main/assets/scheduleB.pdf")
-        if (!scheduleFile.exists()) {
-            println("scheduleB.pdf not found.")
-            return
-        }
-
-        val items = mutableListOf<PdfTextItem>()
-        PDDocument.load(scheduleFile).use { document ->
-            val stripper = object : PDFTextStripper() {
-                init {
-                    sortByPosition = true
-                }
-
-                override fun writeString(text: String, textPositions: MutableList<TextPosition>) {
-                    val firstPos = textPositions.firstOrNull()
-                    if (firstPos != null) {
-                        items.add(PdfTextItem(text = text, x = firstPos.xDirAdj, y = firstPos.yDirAdj))
-                    }
-                }
+            org.junit.Assert.assertTrue("Should parse exam dates", results.any { it.examDate.isNotBlank() })
+            // Assert that every course with an exam date also has an exam time extracted!
+            val coursesWithDate = results.filter { it.examDate.isNotBlank() }
+            val missingTime = coursesWithDate.filter { it.examTime.isBlank() }
+            if (missingTime.isNotEmpty()) {
+                val missingTitles = missingTime.joinToString { "'${it.title}' (date: ${it.examDate})" }
+                org.junit.Assert.fail("Missing exam time for: $missingTitles")
             }
-            val text = stripper.getText(document)
-            println("=== SCHEDULE B RAW TEXT ===")
-            println(text)
-            println("=== SCHEDULE B ITEMS (${items.size}) ===")
-            items.forEach { item ->
-                println("x=%.1f, y=%.1f : '%s'".format(item.x, item.y, item.text))
-            }
-
-            val results = CourseScheduleParser.parse(text, items)
-            println("=== PARSED RESULTS (${results.size}) FROM scheduleB.pdf ===")
-            results.forEachIndexed { index, course ->
-                println("${index + 1}. Title: '${course.title}' | Day: '${course.day}' | Time: '${course.startTime}-${course.endTime}' | Room: '${course.room}' | ExamDate: '${course.examDate}'")
-            }
-
-            org.junit.Assert.assertTrue("Should parse courses from scheduleB.pdf", results.isNotEmpty())
         }
-    }
-
-    @Test
-    fun testArabicPresentationFormDecoding() {
-        // "ریاضی 1" + " " + "سه‌شنبه" + " 08:00 تا 10:00 کلاس{101}" encoded with presentation forms
-        val presentationFormSample = "\uFEAE\uFEF2\uFE8E\uFEA9\uFEEC 1 \uFEB3\uFEEC\uFE98 \uFE95\uFEAE\uFEF2\uFE8E\uFEA9\uFEEC \uFEB3\uFEEC\uFE98 \uFE8D\uFEA0\uFEA4\uFEA8\uFEAE 08:00 تا 10:00 کلاس{101}"
-        val decoded = PersianFontDecoder.decodeAndNormalize(presentationFormSample)
-        org.junit.Assert.assertTrue(decoded.contains("101"))
-
-        val sampleWithForm = "ریاضی 1 سه‌شنبه 08:00 تا 10:00 کلاس{101}"
-        val courses = CourseScheduleParser.parse(sampleWithForm)
-        org.junit.Assert.assertEquals(1, courses.size)
-        org.junit.Assert.assertEquals("08:00", courses[0].startTime)
-        org.junit.Assert.assertEquals("10:00", courses[0].endTime)
-    }
-
-    @Test
-    fun testReversedVisualTextParsing() {
-        val reversedSample = "101{سالک} 00:01 تا 00:80 ﻩﺩﺎﺩ ﯼﺎﻫ‌ﻩﺎﮕﯾﺎﭘ ﻪﺒﻨﺸﮑﯾ"
-        val unshaped = PersianFontDecoder.unshapeReversedText(reversedSample)
-        org.junit.Assert.assertTrue(unshaped.contains("یکشنبه"))
-        org.junit.Assert.assertTrue(unshaped.contains("پایگاه‌های داده"))
-
-        val courses = CourseScheduleParser.parse(reversedSample)
-        org.junit.Assert.assertEquals(1, courses.size)
-        org.junit.Assert.assertEquals("یکشنبه", courses[0].day)
-        org.junit.Assert.assertEquals("08:00", courses[0].startTime)
-        org.junit.Assert.assertEquals("10:00", courses[0].endTime)
-    }
-
-    @Test
-    fun testInvertedLamAlefAndLigatures() {
-        val invertedSample = "معادالت دیفرانسیل دوشنبه 14:00 تا 16:00 کالس{201}"
-        val courses = CourseScheduleParser.parse(invertedSample)
-        org.junit.Assert.assertEquals(1, courses.size)
-        org.junit.Assert.assertEquals("معادلات دیفرانسیل", courses[0].title)
-        org.junit.Assert.assertEquals("دوشنبه", courses[0].day)
-        org.junit.Assert.assertEquals("201", courses[0].room)
     }
 }

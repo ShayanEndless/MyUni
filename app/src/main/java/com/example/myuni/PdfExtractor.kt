@@ -35,15 +35,13 @@ object PdfExtractor {
             val inputStream = context.contentResolver.openInputStream(uri)
                 ?: return@withContext PdfExtractionResult(fileName, 0, "", "", emptyList(), "امکان باز کردن فایل PDF وجود ندارد.")
 
-            var rawText = ""
+            val text: String
             val pageCount: Int
             val items = mutableListOf<PdfTextItem>()
 
             inputStream.use { stream ->
                 PDDocument.load(stream).use { document ->
                     pageCount = document.numberOfPages
-                    
-                    // Strategy 1: Positional extraction (preserves table coordinate alignment)
                     val stripper = object : PDFTextStripper() {
                         init {
                             sortByPosition = true
@@ -53,36 +51,20 @@ object PdfExtractor {
                             super.writeString(text)
                             val firstPos = textPositions.firstOrNull()
                             if (firstPos != null) {
-                                val decodedPos = PersianFontDecoder.decodeAndNormalize(text)
-                                items.add(PdfTextItem(text = decodedPos, x = firstPos.xDirAdj, y = firstPos.yDirAdj))
+                                items.add(PdfTextItem(text = text, x = firstPos.xDirAdj, y = firstPos.yDirAdj))
                             }
                         }
                     }
-                    rawText = stripper.getText(document) ?: ""
-
-                    // Strategy 2: Non-positional flow extraction fallback if positional returns blank
-                    if (rawText.isBlank() && pageCount > 0) {
-                        val flowStripper = PDFTextStripper().apply { sortByPosition = false }
-                        rawText = flowStripper.getText(document) ?: ""
-                    }
+                    text = stripper.getText(document) ?: ""
                 }
             }
 
-            // Step 1: Font decoding and Unicode normalization (handles Presentation Forms, PUA, Mojibake)
-            var cleanedText = PersianFontDecoder.decodeAndNormalize(rawText)
-
-            // Step 2: Unshape visual reversed RTL text if detected
-            if (PersianFontDecoder.isReversedText(rawText)) {
-                val unshaped = PersianFontDecoder.unshapeReversedText(rawText)
-                if (unshaped.isNotBlank()) {
-                    cleanedText = unshaped
-                }
-            }
+            val cleanedText = normalizePersianText(text)
 
             PdfExtractionResult(
                 fileName = fileName,
                 pageCount = pageCount,
-                rawText = rawText,
+                rawText = text,
                 formattedText = cleanedText,
                 textItems = items
             )
@@ -122,10 +104,61 @@ object PdfExtractor {
     }
 
     fun normalizePersianText(text: String): String {
-        return PersianFontDecoder.decodeAndNormalize(text)
+        if (text.isBlank()) return text
+
+        // 1. NFKC Unicode normalization (converts Arabic Presentation Forms A & B to standard Persian Unicode characters)
+        val nfkc = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
+
+        // 2. Normalize Arabic letter variants to standard Persian
+        var cleaned = nfkc
+            .replace('ي', 'ی')
+            .replace('ى', 'ی')
+            .replace('ك', 'ک')
+            .replace('ة', 'ه')
+            .replace('أ', 'ا')
+            .replace('إ', 'ا')
+            .replace('ٱ', 'ا')
+            .replace('٠', '۰').replace('١', '۱').replace('٢', '۲').replace('٣', '۳').replace('٤', '۴')
+            .replace('٥', '۵').replace('٦', '۶').replace('٧', '۷').replace('٨', '۸').replace('٩', '۹')
+
+        // 3. Fix inverted Lam-Alef (اسالم -> اسلام, معادالت -> معادلات)
+        cleaned = CourseScheduleParser.fixLamAlefInversion(cleaned)
+
+        // 4. Preserve half-space (\u200C) and remove invisible control chars
+        cleaned = cleaned
+            .replace("\u200B", "")
+            .replace("\uFEFF", "")
+            .replace("\u200E", "")
+            .replace("\u200F", "")
+            .replace("\u061C", "")
+            .replace(Regex("""\s*\u200C\s*"""), "\u200C")
+            .replace(Regex("""\u200C+"""), "\u200C")
+
+        // 5. Apply Persian half-space typography rules
+        cleaned = CourseScheduleParser.applyPersianHalfSpaceRules(cleaned)
+
+        // 6. Normalize common day names & typos
+        cleaned = cleaned
+            .replace("یک\u200Cشنبه", "یکشنبه")
+            .replace("یک شنبه", "یکشنبه")
+            .replace("یک‌شنبه", "یکشنبه")
+            .replace("يكشنبه", "یکشنبه")
+            .replace("دو\u200Cشنبه", "دوشنبه")
+            .replace("دو شنبه", "دوشنبه")
+            .replace("سه\u200Cشنبه", "سه‌شنبه")
+            .replace("سه شنبه", "سه‌شنبه")
+            .replace("سه‌ شنبه", "سه‌شنبه")
+            .replace("چهار\u200Cشنبه", "چهارشنبه")
+            .replace("چهار شنبه", "چهارشنبه")
+            .replace("پنج\u200Cشنبه", "پنجشنبه")
+            .replace("پنج شنبه", "پنجشنبه")
+
+        return cleaned
     }
 
     fun reverseLines(text: String): String {
-        return PersianFontDecoder.unshapeReversedText(text)
+        return text.lines().joinToString("\n") { line ->
+            line.reversed()
+        }
     }
 }
