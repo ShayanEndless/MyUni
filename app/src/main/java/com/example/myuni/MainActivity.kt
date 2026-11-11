@@ -1499,7 +1499,7 @@ fun scheduleDeadlineAlarm(context: Context, item: DeadlineItem) {
         return
     }
 
-    setAlarmAndAllowWhileIdle(alarmManager, item.dueTimestamp, pendingIntent)
+    setAlarmAndAllowWhileIdle(alarmManager, item.dueTimestamp, pendingIntent, context)
 }
 
 class DeadlineAlarmReceiver : BroadcastReceiver() {
@@ -3241,6 +3241,8 @@ fun MainScreen(
     var showAppUpdateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        scheduleAllAlarms(context)
+
         // بررسی کش محلی برای فورس‌آپدیت در همان روز (حتی اگر اپ بسته و دوباره باز شود)
         val cachedVersionCode = prefs.getInt("cache_latest_version_code", BuildConfig.VERSION_CODE)
         val cachedForceUpdate = prefs.getBoolean("cache_force_update", false)
@@ -3498,6 +3500,10 @@ fun MainScreen(
 
     var isClassNotificationEnabled by remember {
         mutableStateOf(prefs.getBoolean("pref_class_notification_enabled", true))
+    }
+
+    var classNotificationMinutes by remember {
+        mutableStateOf(prefs.getInt("pref_class_notification_minutes", 15))
     }
 
     var isFoodNotificationEnabled by remember {
@@ -5359,11 +5365,15 @@ fun MainScreen(
                                     settingsScrollState,
                                     enabled = isExpandedTableSettings || isExpandedSupport
                                 )
-                                .padding(horizontal = 14.dp),
+                                .padding(
+                                    start = 14.dp,
+                                    end = 14.dp,
+                                    top = innerPadding.calculateTopPadding() + 10.dp,
+                                    bottom = innerPadding.calculateBottomPadding() + 14.dp
+                                ),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Spacer(modifier = Modifier.height(innerPadding.calculateTopPadding() + 10.dp))
                             NotificationSettingsCard(
                                 isClassNotificationEnabled = isClassNotificationEnabled,
                                 onClassNotificationChange = { newValue ->
@@ -5374,6 +5384,12 @@ fun MainScreen(
                                     ) {
                                         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                     }
+                                    scheduleClassNotifications(context, tableData)
+                                },
+                                classNotificationMinutes = classNotificationMinutes,
+                                onClassNotificationMinutesChange = { newMinutes ->
+                                    classNotificationMinutes = newMinutes
+                                    prefs.edit().putInt("pref_class_notification_minutes", newMinutes).apply()
                                     scheduleClassNotifications(context, tableData)
                                 },
                                 isFoodNotificationEnabled = isFoodNotificationEnabled,
@@ -6389,7 +6405,7 @@ fun scheduleFoodReservationAlarm(context: Context, tableData: Map<String, String
         cal.add(Calendar.DAY_OF_YEAR, 7)
     }
 
-    setAlarmAndAllowWhileIdle(alarmManager, cal.timeInMillis, pendingIntent)
+    setAlarmAndAllowWhileIdle(alarmManager, cal.timeInMillis, pendingIntent, context)
 }
 
 fun scheduleAllAlarms(context: Context) {
@@ -6454,6 +6470,8 @@ fun sendClassNotification(context: Context, courseTitle: String, room: String) {
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "اطلاع‌رسانی‌های شروع و یادآوری کلاس‌های درسی"
+            enableVibration(true)
+            enableLights(true)
         }
         notificationManager.createNotificationChannel(channel)
     }
@@ -6480,6 +6498,7 @@ fun sendClassNotification(context: Context, courseTitle: String, room: String) {
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle(notificationText)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setDefaults(NotificationCompat.DEFAULT_ALL)
         .setAutoCancel(true)
         .setContentIntent(pendingIntent)
 
@@ -6520,6 +6539,7 @@ private data class ClassScheduleItem(
 fun scheduleClassNotifications(context: Context, tableData: Map<String, String>) {
     val prefs = context.getSharedPreferences("MyUniPrefs", Context.MODE_PRIVATE)
     val isEnabled = prefs.getBoolean("pref_class_notification_enabled", true)
+    val reminderMinutes = prefs.getInt("pref_class_notification_minutes", 15)
     val isWeekParityFlipped = prefs.getBoolean("isWeekParityFlipped", false)
 
     val fullDaysList = listOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
@@ -6536,132 +6556,101 @@ fun scheduleClassNotifications(context: Context, tableData: Map<String, String>)
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val holdingSlotsList = listOf("8:30", "10:15", "12:30", "14:15", "16:00")
 
-    if (!isEnabled) {
-        fullDaysList.forEachIndexed { dayIndex, dayStr ->
-            holdingSlotsList.forEach { slotKey ->
-                val startMinutes = getSlotStartMinutes(slotKey)
-                val requestCode = (dayIndex * 10000 + startMinutes).toInt()
-                val intent = Intent(context, ClassAlarmReceiver::class.java)
-                val pendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    requestCode,
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                alarmManager.cancel(pendingIntent)
-            }
-        }
-        return
-    }
-
-    fullDaysList.forEach { dayStr ->
-        val targetCalendarDay = dayToCalendarDay[dayStr] ?: return@forEach
-
-        val nowCal = Calendar.getInstance().apply {
-            firstDayOfWeek = Calendar.SATURDAY
-        }
-        val currentDayOfWeek = nowCal.get(Calendar.DAY_OF_WEEK)
-        var daysUntilTarget = targetCalendarDay - currentDayOfWeek
-        if (daysUntilTarget < 0) {
-            daysUntilTarget += 7
-        }
-
-        val targetCal = Calendar.getInstance().apply {
-            firstDayOfWeek = Calendar.SATURDAY
-            timeInMillis = nowCal.timeInMillis
-            add(Calendar.DAY_OF_YEAR, daysUntilTarget)
-        }
-
-        val isEvenWeek = isEvenWeekContinuous(targetCal.timeInMillis, isWeekParityFlipped)
-
-        val holdingData = getHoldingTableData(tableData, isEvenWeek, fullDaysList)
-
-        val dayClasses = mutableListOf<ClassScheduleItem>()
+    fullDaysList.forEachIndexed { dayIndex, dayStr ->
+        val targetCalendarDay = dayToCalendarDay[dayStr] ?: return@forEachIndexed
 
         holdingSlotsList.forEach { slotKey ->
-            val blockKey = "block_${dayStr}_$slotKey"
-            val courseTitle = holdingData[blockKey]
+            val startMinutes = getSlotStartMinutes(slotKey)
+            val requestCode = (dayIndex * 10000 + startMinutes).toInt()
+            val intent = Intent(context, ClassAlarmReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            if (!isEnabled) {
+                alarmManager.cancel(pendingIntent)
+                return@forEach
+            }
+
+            val notifMinutes: Int = startMinutes - reminderMinutes
+
+            if (notifMinutes < 0) return@forEach
+
+            val notifHour = notifMinutes / 60
+            val notifMin = notifMinutes % 60
+
+            val nowCal = Calendar.getInstance().apply {
+                firstDayOfWeek = Calendar.SATURDAY
+            }
+            val currentDayOfWeek = nowCal.get(Calendar.DAY_OF_WEEK)
+            var daysUntilTarget = targetCalendarDay - currentDayOfWeek
+            if (daysUntilTarget < 0) {
+                daysUntilTarget += 7
+            }
+
+            val cal = Calendar.getInstance().apply {
+                firstDayOfWeek = Calendar.SATURDAY
+                timeInMillis = nowCal.timeInMillis
+                add(Calendar.DAY_OF_YEAR, daysUntilTarget)
+                set(Calendar.HOUR_OF_DAY, notifHour)
+                set(Calendar.MINUTE, notifMin)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            if (cal.timeInMillis <= System.currentTimeMillis()) {
+                cal.add(Calendar.DAY_OF_YEAR, 7)
+            }
+
+            val isEvenWeekForNotif = isEvenWeekContinuous(cal.timeInMillis, isWeekParityFlipped)
+            val holdingData = getHoldingTableData(tableData, isEvenWeekForNotif, fullDaysList)
+
+            val courseTitle = holdingData["block_${dayStr}_$slotKey"]
+            val room = holdingData["room_${dayStr}_$slotKey"] ?: ""
+
             if (!courseTitle.isNullOrBlank()) {
-                val roomKey = "room_${dayStr}_$slotKey"
-                val room = holdingData[roomKey] ?: ""
-                val startMinutes = getSlotStartMinutes(slotKey)
-                val endMinutes = getSlotEndMinutes(slotKey, "holding")
-
-                dayClasses.add(
-                    ClassScheduleItem(
-                        dayStr = dayStr,
-                        slotKey = slotKey,
-                        courseTitle = courseTitle,
-                        room = room,
-                        startMinutes = startMinutes,
-                        endMinutes = endMinutes
-                    )
-                )
-            }
-        }
-
-        dayClasses.forEachIndexed { index, classItem ->
-            val notifMinutes: Int = if (index == 0) {
-                classItem.startMinutes - 30
-            } else {
-                when (classItem.slotKey) {
-                    "10:15" -> 9 * 60 + 45   // 9:45
-                    "12:30" -> 11 * 60 + 30  // 11:30
-                    "14:15" -> 13 * 60 + 45  // 13:45
-                    "16:00" -> 15 * 60 + 30  // 15:30
-                    else -> classItem.startMinutes - 30
+                val alarmIntent = Intent(context, ClassAlarmReceiver::class.java).apply {
+                    putExtra("EXTRA_COURSE_NAME", courseTitle)
+                    putExtra("EXTRA_ROOM_NAME", room)
                 }
-            }
-
-            if (notifMinutes >= 0) {
-                val notifHour = notifMinutes / 60
-                val notifMin = notifMinutes % 60
-
-                val cal = Calendar.getInstance().apply {
-                    firstDayOfWeek = Calendar.SATURDAY
-                    timeInMillis = targetCal.timeInMillis
-                    set(Calendar.HOUR_OF_DAY, notifHour)
-                    set(Calendar.MINUTE, notifMin)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-
-                if (cal.timeInMillis <= System.currentTimeMillis()) {
-                    cal.add(Calendar.DAY_OF_YEAR, 7)
-                }
-
-                val dayIndex = fullDaysList.indexOf(dayStr).coerceAtLeast(0)
-                val requestCode = (dayIndex * 10000 + classItem.startMinutes).toInt()
-
-                val intent = Intent(context, ClassAlarmReceiver::class.java).apply {
-                    putExtra("EXTRA_COURSE_NAME", classItem.courseTitle)
-                    putExtra("EXTRA_ROOM_NAME", classItem.room)
-                }
-                val pendingIntent = PendingIntent.getBroadcast(
+                val classPendingIntent = PendingIntent.getBroadcast(
                     context,
                     requestCode,
-                    intent,
+                    alarmIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
                 try {
-                    setAlarmAndAllowWhileIdle(alarmManager, cal.timeInMillis, pendingIntent)
+                    setAlarmAndAllowWhileIdle(alarmManager, cal.timeInMillis, classPendingIntent, context)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
+            } else {
+                alarmManager.cancel(pendingIntent)
             }
         }
     }
 }
 
-fun setAlarmAndAllowWhileIdle(alarmManager: AlarmManager, triggerAtMillis: Long, pendingIntent: PendingIntent) {
+fun setAlarmAndAllowWhileIdle(alarmManager: AlarmManager, triggerAtMillis: Long, pendingIntent: PendingIntent, context: Context? = null) {
     try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (alarmManager.canScheduleExactAlarms()) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-            } else {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-            }
+        val showIntent = context?.let {
+            PendingIntent.getActivity(
+                it,
+                0,
+                Intent(it, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } ?: pendingIntent
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val alarmClockInfo = AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent)
+            alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
         } else {
@@ -6710,6 +6699,8 @@ fun openBatteryOptimizationSettings(context: Context) {
 fun NotificationSettingsCard(
     isClassNotificationEnabled: Boolean,
     onClassNotificationChange: (Boolean) -> Unit,
+    classNotificationMinutes: Int,
+    onClassNotificationMinutesChange: (Int) -> Unit,
     isFoodNotificationEnabled: Boolean,
     onFoodNotificationChange: (Boolean) -> Unit,
     foodNotificationDay: String,
@@ -6754,6 +6745,46 @@ fun NotificationSettingsCard(
                     checked = isClassNotificationEnabled,
                     onCheckedChange = { onClassNotificationChange(it) },
                     colors = switchColors
+                )
+            }
+
+            // Class Reminder Time Setting
+            var showClassMinutesPickerDialog by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showClassMinutesPickerDialog = true }
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("زمان یادآوری", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = selectedColor.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, selectedColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = "$classNotificationMinutes دقیقه قبل",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = selectedColor,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            if (showClassMinutesPickerDialog) {
+                CustomClassReminderMinutesPickerDialog(
+                    initialMinutes = classNotificationMinutes,
+                    selectedColor = selectedColor,
+                    onDismiss = { showClassMinutesPickerDialog = false },
+                    onConfirm = { mins ->
+                        onClassNotificationMinutesChange(mins)
+                        showClassMinutesPickerDialog = false
+                    }
                 )
             }
 
@@ -7743,6 +7774,88 @@ fun CustomDayPickerDialog(
                             )
                             .clickable {
                                 onConfirm(key)
+                                onDismiss()
+                            },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) selectedColor.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 14.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) selectedColor else MaterialTheme.colorScheme.onSurface
+                            )
+
+                            androidx.compose.material3.RadioButton(
+                                selected = isSelected,
+                                onClick = null,
+                                colors = androidx.compose.material3.RadioButtonDefaults.colors(
+                                    selectedColor = selectedColor,
+                                    unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun CustomClassReminderMinutesPickerDialog(
+    initialMinutes: Int,
+    selectedColor: Color,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    val options = listOf(5, 10, 15, 20, 25, 30)
+
+    RtlAlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "زمان یادآوری کلاس",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = selectedColor
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                options.forEach { mins ->
+                    val isSelected = initialMinutes == mins
+                    val label = "$mins دقیقه قبل از شروع کلاس"
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) selectedColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable {
+                                onConfirm(mins)
                                 onDismiss()
                             },
                         shape = RoundedCornerShape(12.dp),
