@@ -11,7 +11,10 @@ class BootReceiver : BroadcastReceiver() {
             action == Intent.ACTION_MY_PACKAGE_REPLACED ||
             action == "android.intent.action.QUICKBOOT_POWERON" ||
             action == "com.htc.intent.action.QUICKBOOT_POWERON" ||
-            action == Intent.ACTION_LOCKED_BOOT_COMPLETED
+            action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
+            action == Intent.ACTION_TIME_CHANGED ||
+            action == Intent.ACTION_TIMEZONE_CHANGED ||
+            action == Intent.ACTION_DATE_CHANGED
         ) {
             val prefs = context.getSharedPreferences("MyUniPrefs", Context.MODE_PRIVATE)
             val tableData = mutableMapOf<String, String>()
